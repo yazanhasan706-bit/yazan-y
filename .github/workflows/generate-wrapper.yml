@@ -3,6 +3,9 @@ name: Generate Gradle Wrapper
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   generate-wrapper:
     runs-on: ubuntu-latest
