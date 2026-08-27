@@ -3,7 +3,7 @@
 <resources>
 
     <style name="Theme.YazanTranslator"
-        parent="android:style/Theme.Material.Light.NoActionBar">
+        parent="Theme.AppCompat.Light.NoActionBar">
 
         <item name="android:fontFamily">sans</item>
         <item name="android:windowActionModeOverlay">true</item>
