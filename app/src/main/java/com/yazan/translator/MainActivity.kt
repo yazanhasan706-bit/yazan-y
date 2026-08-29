@@ -17,6 +17,7 @@ private lateinit var mediaProjectionManager: MediaProjectionManager
 companion object {
     private const val SCREEN_CAPTURE_REQUEST_CODE = 1001
     private const val START_SCREEN_CAPTURE = "START_SCREEN_CAPTURE"
+    const val START_PROJECTION_SERVICE = "START_PROJECTION_SERVICE"
 }
 
 override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,7 +66,6 @@ private fun handleBubbleIntent(intent: Intent?) {
             false
         ) == true
     ) {
-
         requestScreenCapture()
 
         intent.removeExtra(START_SCREEN_CAPTURE)
@@ -121,8 +121,35 @@ override fun onActivityResult(
             data != null
         ) {
 
+            val serviceIntent =
+                Intent(
+                    this,
+                    FloatingBubbleService::class.java
+                )
+
+            serviceIntent.putExtra(
+                START_PROJECTION_SERVICE,
+                true
+            )
+
+            serviceIntent.putExtra(
+                "RESULT_CODE",
+                resultCode
+            )
+
+            serviceIntent.putExtra(
+                "RESULT_DATA",
+                data
+            )
+
+            startService(serviceIntent)
+
             resultText.text =
                 "تم السماح بالتقاط الشاشة ✅\n\nجاهز لالتقاط الشاشة."
+
+            // نرجع للتطبيق الذي كان مفتوحاً
+            finish()
+
         } else {
 
             resultText.text =
