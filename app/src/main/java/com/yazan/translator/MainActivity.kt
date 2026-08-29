@@ -27,6 +27,9 @@ class MainActivity : AppCompatActivity() {
             getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
         translateButton.setOnClickListener {
+
+            resultText.text = "جاري تجهيز قراءة الشاشة..."
+
             val captureIntent =
                 mediaProjectionManager.createScreenCaptureIntent()
 
@@ -46,12 +49,16 @@ class MainActivity : AppCompatActivity() {
         super.onActivityResult(requestCode, resultCode, data)
 
         if (requestCode == SCREEN_CAPTURE_REQUEST_CODE) {
+
             if (resultCode == Activity.RESULT_OK && data != null) {
+
                 findViewById<TextView>(R.id.resultText).text =
-                    "تم السماح بالتقاط الشاشة"
+                    "تم السماح بالتقاط الشاشة.\n\nالخطوة التالية: قراءة النص من الشاشة."
+
             } else {
+
                 findViewById<TextView>(R.id.resultText).text =
-                    "لم يتم السماح بالتقاط الشاشة"
+                    "لم يتم السماح بالتقاط الشاشة."
             }
         }
     }
