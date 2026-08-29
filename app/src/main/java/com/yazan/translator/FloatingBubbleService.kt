@@ -9,7 +9,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
-import android.widget.Toast
 
 class FloatingBubbleService : Service() {
 
@@ -97,7 +96,9 @@ private inner class BubbleTouchListener : View.OnTouchListener {
                 val dx = event.rawX - initialTouchX
                 val dy = event.rawY - initialTouchY
 
-                if (dx != 0f || dy != 0f) {
+                if (kotlin.math.abs(dx) > 10 ||
+                    kotlin.math.abs(dy) > 10
+                ) {
                     moved = true
                 }
 
@@ -116,11 +117,17 @@ private inner class BubbleTouchListener : View.OnTouchListener {
 
                 if (!moved) {
 
-                    Toast.makeText(
+                    val intent = Intent(
                         this@FloatingBubbleService,
-                        "جاري تجهيز ترجمة الشاشة...",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                        MainActivity::class.java
+                    )
+
+                    intent.addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    )
+
+                    startActivity(intent)
                 }
 
                 return true
