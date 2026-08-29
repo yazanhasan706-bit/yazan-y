@@ -1,33 +1,37 @@
-<?xml version="1.0" encoding="utf-8"?><manifest xmlns:android="http://schemas.android.com/apk/res/android"><uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+<?xml version="1.0" encoding="utf-8"?>
 
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
-<application
-    android:allowBackup="true"
-    android:label="Yazan Translator"
-    android:supportsRtl="true"
-    android:theme="@style/Theme.YazanTranslator">
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
-    <activity
-        android:name=".MainActivity"
-        android:exported="true">
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-        <intent-filter>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
-        </intent-filter>
+    <application
+        android:allowBackup="true"
+        android:label="Yazan Translator"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.YazanTranslator">
 
-    </activity>
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
 
-    <service
-        android:name=".FloatingBubbleService"
-        android:exported="false"
-        android:foregroundServiceType="mediaProjection" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
 
-</application>
+        </activity>
+
+        <service
+            android:name=".FloatingBubbleService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+    </application>
 
 </manifest>

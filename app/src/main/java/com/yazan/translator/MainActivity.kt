@@ -3,7 +3,10 @@ package com.yazan.translator
 import android.app.Activity
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -14,6 +17,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val SCREEN_CAPTURE_REQUEST_CODE = 1001
+        private const val START_SCREEN_CAPTURE = "START_SCREEN_CAPTURE"
         const val START_PROJECTION_SERVICE = "START_PROJECTION_SERVICE"
     }
 
@@ -31,6 +35,41 @@ class MainActivity : AppCompatActivity() {
 
         translateButton.setOnClickListener {
             requestScreenCapture()
+        }
+
+        if (Settings.canDrawOverlays(this)) {
+            startBubbleService()
+        } else {
+            val overlayIntent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+
+            startActivity(overlayIntent)
+        }
+
+        handleBubbleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+
+        setIntent(intent)
+
+        handleBubbleIntent(intent)
+    }
+
+    private fun handleBubbleIntent(intent: Intent?) {
+
+        if (
+            intent?.getBooleanExtra(
+                START_SCREEN_CAPTURE,
+                false
+            ) == true
+        ) {
+            requestScreenCapture()
+
+            intent.removeExtra(START_SCREEN_CAPTURE)
         }
     }
 
@@ -52,6 +91,26 @@ class MainActivity : AppCompatActivity() {
 
             resultText.text =
                 "حدث خطأ عند طلب التقاط الشاشة:\n${e.message}"
+        }
+    }
+
+    private fun startBubbleService() {
+
+        val serviceIntent =
+            Intent(this, FloatingBubbleService::class.java)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+
+        if (Settings.canDrawOverlays(this)) {
+            startBubbleService()
         }
     }
 
@@ -77,8 +136,37 @@ class MainActivity : AppCompatActivity() {
                 data != null
             ) {
 
+                val serviceIntent =
+                    Intent(
+                        this,
+                        FloatingBubbleService::class.java
+                    )
+
+                serviceIntent.putExtra(
+                    START_PROJECTION_SERVICE,
+                    true
+                )
+
+                serviceIntent.putExtra(
+                    "RESULT_CODE",
+                    resultCode
+                )
+
+                serviceIntent.putExtra(
+                    "RESULT_DATA",
+                    data
+                )
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+
                 resultText.text =
-                    "تم السماح بالتقاط الشاشة ✅\n\nالخطوة التالية: التقاط الشاشة."
+                    "تم السماح بالتقاط الشاشة ✅\n\nجاهز لالتقاط الشاشة."
+
+                finish()
 
             } else {
 
