@@ -1,27 +1,29 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?><manifest xmlns:android="http://schemas.android.com/apk/res/android"><uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+<uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<application
+    android:allowBackup="true"
+    android:label="Yazan Translator"
+    android:supportsRtl="true"
+    android:theme="@style/Theme.YazanTranslator">
 
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <activity
+        android:name=".MainActivity"
+        android:exported="true">
 
-    <application
-        android:allowBackup="true"
-        android:label="Yazan Translator"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.YazanTranslator">
+        <intent-filter>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent-filter>
 
-        <activity
-            android:name=".MainActivity"
-            android:exported="true">
+    </activity>
 
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
+    <service
+        android:name=".FloatingBubbleService"
+        android:enabled="true"
+        android:exported="false" />
 
-        </activity>
-
-    </application>
+</application>
 
 </manifest>
