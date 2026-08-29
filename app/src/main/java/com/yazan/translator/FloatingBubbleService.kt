@@ -5,11 +5,11 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.IBinder
 import android.view.Gravity
-import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
+import android.widget.Toast
 
 class FloatingBubbleService : Service() {
 
@@ -19,13 +19,17 @@ private lateinit var bubbleView: View
 override fun onCreate() {
     super.onCreate()
 
-    windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+    windowManager =
+        getSystemService(WINDOW_SERVICE) as WindowManager
 
     bubbleView = TextView(this).apply {
+
         text = "أ"
         textSize = 22f
         gravity = Gravity.CENTER
+
         setBackgroundResource(android.R.drawable.btn_default)
+
         setOnTouchListener(BubbleTouchListener())
     }
 
@@ -63,35 +67,62 @@ private inner class BubbleTouchListener : View.OnTouchListener {
     private var initialTouchX = 0f
     private var initialTouchY = 0f
 
+    private var moved = false
+
     override fun onTouch(
         view: View?,
         event: MotionEvent
     ): Boolean {
 
-        val params = bubbleView.layoutParams as WindowManager.LayoutParams
+        val params =
+            bubbleView.layoutParams as WindowManager.LayoutParams
 
         when (event.action) {
 
             MotionEvent.ACTION_DOWN -> {
+
                 initialX = params.x
                 initialY = params.y
+
                 initialTouchX = event.rawX
                 initialTouchY = event.rawY
+
+                moved = false
+
                 return true
             }
 
             MotionEvent.ACTION_MOVE -> {
-                params.x =
-                    initialX + (event.rawX - initialTouchX).toInt()
 
-                params.y =
-                    initialY + (event.rawY - initialTouchY).toInt()
+                val dx = event.rawX - initialTouchX
+                val dy = event.rawY - initialTouchY
 
-                windowManager.updateViewLayout(bubbleView, params)
+                if (dx != 0f || dy != 0f) {
+                    moved = true
+                }
+
+                params.x = initialX + dx.toInt()
+                params.y = initialY + dy.toInt()
+
+                windowManager.updateViewLayout(
+                    bubbleView,
+                    params
+                )
+
                 return true
             }
 
             MotionEvent.ACTION_UP -> {
+
+                if (!moved) {
+
+                    Toast.makeText(
+                        this@FloatingBubbleService,
+                        "جاري تجهيز ترجمة الشاشة...",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+
                 return true
             }
         }
