@@ -17,8 +17,9 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val SCREEN_CAPTURE_REQUEST_CODE = 1001
-        private const val START_SCREEN_CAPTURE = "START_SCREEN_CAPTURE"
         const val START_PROJECTION_SERVICE = "START_PROJECTION_SERVICE"
+        private const val RESULT_CODE = "RESULT_CODE"
+        private const val RESULT_DATA = "RESULT_DATA"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,6 +38,8 @@ class MainActivity : AppCompatActivity() {
             requestScreenCapture()
         }
 
+        // تشغيل الفقاعة فقط إذا كانت صلاحية الظهور فوق التطبيقات مفعلة.
+        // لا نشغّلها كـForeground Service من هنا.
         if (Settings.canDrawOverlays(this)) {
             startBubbleService()
         } else {
@@ -47,35 +50,26 @@ class MainActivity : AppCompatActivity() {
 
             startActivity(overlayIntent)
         }
+    }
 
-        handleBubbleIntent(intent)
+    override fun onResume() {
+        super.onResume()
+
+        if (Settings.canDrawOverlays(this)) {
+            startBubbleService()
+        }
     }
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
 
         setIntent(intent)
-
-        handleBubbleIntent(intent)
-    }
-
-    private fun handleBubbleIntent(intent: Intent?) {
-
-        if (
-            intent?.getBooleanExtra(
-                START_SCREEN_CAPTURE,
-                false
-            ) == true
-        ) {
-            requestScreenCapture()
-
-            intent.removeExtra(START_SCREEN_CAPTURE)
-        }
     }
 
     private fun requestScreenCapture() {
 
         try {
+
             val captureIntent =
                 mediaProjectionManager.createScreenCaptureIntent()
 
@@ -86,31 +80,35 @@ class MainActivity : AppCompatActivity() {
 
         } catch (e: Exception) {
 
-            val resultText =
-                findViewById<TextView>(R.id.resultText)
-
-            resultText.text =
+            showMessage(
                 "حدث خطأ عند طلب التقاط الشاشة:\n${e.message}"
+            )
         }
     }
 
     private fun startBubbleService() {
 
-        val serviceIntent =
-            Intent(this, FloatingBubbleService::class.java)
+        try {
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
-        }
-    }
+            val serviceIntent =
+                Intent(
+                    this,
+                    FloatingBubbleService::class.java
+                )
 
-    override fun onResume() {
-        super.onResume()
+            // الخدمة هنا هدفها إظهار الفقاعة فقط.
+            // لا نستخدم startForegroundService قبل موافقة MediaProjection.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
 
-        if (Settings.canDrawOverlays(this)) {
-            startBubbleService()
+        } catch (e: Exception) {
+
+            showMessage(
+                "تعذر تشغيل الفقاعة:\n${e.message}"
+            )
         }
     }
 
@@ -126,53 +124,79 @@ class MainActivity : AppCompatActivity() {
             data
         )
 
-        if (requestCode == SCREEN_CAPTURE_REQUEST_CODE) {
+        if (requestCode != SCREEN_CAPTURE_REQUEST_CODE) {
+            return
+        }
 
-            val resultText =
-                findViewById<TextView>(R.id.resultText)
+        if (
+            resultCode != Activity.RESULT_OK ||
+            data == null
+        ) {
 
-            if (
-                resultCode == Activity.RESULT_OK &&
-                data != null
-            ) {
+            showMessage(
+                "لم يتم السماح بالتقاط الشاشة."
+            )
 
-                val serviceIntent =
-                    Intent(
-                        this,
-                        FloatingBubbleService::class.java
-                    )
+            return
+        }
 
-                serviceIntent.putExtra(
-                    START_PROJECTION_SERVICE,
-                    true
+        try {
+
+            val serviceIntent =
+                Intent(
+                    this,
+                    FloatingBubbleService::class.java
                 )
 
-                serviceIntent.putExtra(
-                    "RESULT_CODE",
-                    resultCode
+            serviceIntent.putExtra(
+                START_PROJECTION_SERVICE,
+                true
+            )
+
+            serviceIntent.putExtra(
+                RESULT_CODE,
+                resultCode
+            )
+
+            serviceIntent.putExtra(
+                RESULT_DATA,
+                data
+            )
+
+            // الآن فقط نستخدم Foreground Service،
+            // بعد أن وافق المستخدم على مشاركة الشاشة.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
+                startForegroundService(
+                    serviceIntent
                 )
-
-                serviceIntent.putExtra(
-                    "RESULT_DATA",
-                    data
-                )
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(serviceIntent)
-                } else {
-                    startService(serviceIntent)
-                }
-
-                resultText.text =
-                    "تم السماح بالتقاط الشاشة ✅\n\nجاهز لالتقاط الشاشة."
-
-                finish()
 
             } else {
 
-                resultText.text =
-                    "لم يتم السماح بالتقاط الشاشة."
+                startService(
+                    serviceIntent
+                )
             }
+
+            showMessage(
+                "تم السماح بالتقاط الشاشة ✅\n\nجاهز لالتقاط الشاشة."
+            )
+
+            finish()
+
+        } catch (e: Exception) {
+
+            showMessage(
+                "تعذر تشغيل خدمة التقاط الشاشة:\n${e.message}"
+            )
         }
+    }
+
+    private fun showMessage(message: String) {
+
+        val resultText =
+            findViewById<TextView>(R.id.resultText)
+
+        resultText.text = message
     }
 }

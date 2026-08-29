@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -36,20 +37,25 @@ class FloatingBubbleService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
 
-    private val handler = Handler(Looper.getMainLooper())
+    private val handler =
+        Handler(Looper.getMainLooper())
 
     companion object {
-        private const val CHANNEL_ID = "screen_capture_channel"
-        private const val NOTIFICATION_ID = 1001
+
+        private const val CHANNEL_ID =
+            "screen_capture_channel"
+
+        private const val NOTIFICATION_ID =
+            1001
 
         private const val START_PROJECTION_SERVICE =
             "START_PROJECTION_SERVICE"
 
-        private const val RESULT_CODE = "RESULT_CODE"
-        private const val RESULT_DATA = "RESULT_DATA"
+        private const val RESULT_CODE =
+            "RESULT_CODE"
 
-        private const val SCREEN_WIDTH = 1080
-        private const val SCREEN_HEIGHT = 2400
+        private const val RESULT_DATA =
+            "RESULT_DATA"
     }
 
     override fun onCreate() {
@@ -79,11 +85,14 @@ class FloatingBubbleService : Service() {
 
             val resultData: Intent? =
                 if (Build.VERSION.SDK_INT >= 33) {
+
                     intent.getParcelableExtra(
                         RESULT_DATA,
                         Intent::class.java
                     )
+
                 } else {
+
                     @Suppress("DEPRECATION")
                     intent.getParcelableExtra(
                         RESULT_DATA
@@ -94,6 +103,7 @@ class FloatingBubbleService : Service() {
                 resultCode != 0 &&
                 resultData != null
             ) {
+
                 startProjection(
                     resultCode,
                     resultData
@@ -113,33 +123,34 @@ class FloatingBubbleService : Service() {
             return
         }
 
-        createNotificationChannel()
-
-        val notification =
-            createNotification()
-
-        if (Build.VERSION.SDK_INT >= 29) {
-
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            )
-
-        } else {
-
-            startForeground(
-                NOTIFICATION_ID,
-                notification
-            )
-        }
-
-        val manager =
-            getSystemService(
-                MEDIA_PROJECTION_SERVICE
-            ) as MediaProjectionManager
-
         try {
+
+            createNotificationChannel()
+
+            val notification =
+                createNotification()
+
+            if (Build.VERSION.SDK_INT >= 29) {
+
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo
+                        .FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+
+            } else {
+
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification
+                )
+            }
+
+            val manager =
+                getSystemService(
+                    MEDIA_PROJECTION_SERVICE
+                ) as MediaProjectionManager
 
             mediaProjection =
                 manager.getMediaProjection(
@@ -147,11 +158,20 @@ class FloatingBubbleService : Service() {
                     resultData
                 )
 
+            if (mediaProjection == null) {
+
+                Toast.makeText(
+                    this,
+                    "تعذر تفعيل التقاط الشاشة",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+
         } catch (e: Exception) {
 
             Toast.makeText(
                 this,
-                "تعذر تشغيل التقاط الشاشة",
+                "خطأ في خدمة التقاط الشاشة:\n${e.message}",
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -159,7 +179,8 @@ class FloatingBubbleService : Service() {
 
     private fun captureScreen() {
 
-        val projection = mediaProjection
+        val projection =
+            mediaProjection
 
         if (projection == null) {
 
@@ -176,128 +197,152 @@ class FloatingBubbleService : Service() {
             return
         }
 
-        val metrics =
-            resources.displayMetrics
+        try {
 
-        val width =
-            if (metrics.widthPixels > 0) {
+            val metrics =
+                resources.displayMetrics
+
+            val width =
                 metrics.widthPixels
-            } else {
-                SCREEN_WIDTH
-            }
 
-        val height =
-            if (metrics.heightPixels > 0) {
+            val height =
                 metrics.heightPixels
-            } else {
-                SCREEN_HEIGHT
+
+            val density =
+                metrics.densityDpi
+
+            if (
+                width <= 0 ||
+                height <= 0 ||
+                density <= 0
+            ) {
+
+                Toast.makeText(
+                    this,
+                    "تعذر معرفة أبعاد الشاشة",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                return
             }
 
-        val density =
-            metrics.densityDpi
+            imageReader =
+                ImageReader.newInstance(
+                    width,
+                    height,
+                    PixelFormat.RGBA_8888,
+                    2
+                )
 
-        imageReader =
-            ImageReader.newInstance(
-                width,
-                height,
-                PixelFormat.RGBA_8888,
-                2
-            )
+            imageReader?.setOnImageAvailableListener(
+                { reader ->
 
-        imageReader?.setOnImageAvailableListener(
-            { reader ->
+                    val image =
+                        reader.acquireLatestImage()
+                            ?: return@setOnImageAvailableListener
 
-                val image =
-                    reader.acquireLatestImage()
-                        ?: return@setOnImageAvailableListener
+                    try {
 
-                try {
+                        val plane =
+                            image.planes[0]
 
-                    val plane =
-                        image.planes[0]
+                        val buffer =
+                            plane.buffer
 
-                    val buffer =
-                        plane.buffer
+                        val pixelStride =
+                            plane.pixelStride
 
-                    val pixelStride =
-                        plane.pixelStride
+                        val rowStride =
+                            plane.rowStride
 
-                    val rowStride =
-                        plane.rowStride
+                        val rowPadding =
+                            rowStride -
+                                    pixelStride * width
 
-                    val rowPadding =
-                        rowStride -
-                                pixelStride * width
+                        val bitmapWidth =
+                            width +
+                                    rowPadding /
+                                    pixelStride
 
-                    val bitmapWidth =
-                        width +
-                                rowPadding / pixelStride
+                        val bitmap =
+                            Bitmap.createBitmap(
+                                bitmapWidth,
+                                height,
+                                Bitmap.Config.ARGB_8888
+                            )
 
-                    val bitmap =
-                        android.graphics.Bitmap.createBitmap(
-                            bitmapWidth,
-                            height,
-                            android.graphics.Bitmap.Config.ARGB_8888
+                        buffer.rewind()
+
+                        bitmap.copyPixelsFromBuffer(
+                            buffer
                         )
 
-                    bitmap.copyPixelsFromBuffer(
-                        buffer
-                    )
+                        val croppedBitmap =
+                            Bitmap.createBitmap(
+                                bitmap,
+                                0,
+                                0,
+                                width,
+                                height
+                            )
 
-                    val croppedBitmap =
-                        android.graphics.Bitmap.createBitmap(
-                            bitmap,
-                            0,
-                            0,
-                            width,
-                            height
+                        bitmap.recycle()
+
+                        saveScreenshot(
+                            croppedBitmap
                         )
 
-                    bitmap.recycle()
+                        croppedBitmap.recycle()
 
-                    saveScreenshot(
-                        croppedBitmap
-                    )
+                    } catch (e: Exception) {
 
-                    croppedBitmap.recycle()
+                        handler.post {
 
-                } catch (e: Exception) {
+                            Toast.makeText(
+                                this,
+                                "فشل التقاط الشاشة:\n${e.message}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
 
-                    handler.post {
+                    } finally {
 
-                        Toast.makeText(
-                            this,
-                            "فشل التقاط الشاشة",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        image.close()
+
+                        releaseCaptureObjects()
                     }
 
-                } finally {
-
-                    image.close()
-
-                    releaseCaptureObjects()
-                }
-
-            },
-            handler
-        )
-
-        virtualDisplay =
-            projection.createVirtualDisplay(
-                "YazanTranslatorCapture",
-                width,
-                height,
-                density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader!!.surface,
-                null,
+                },
                 handler
             )
+
+            virtualDisplay =
+                projection.createVirtualDisplay(
+                    "YazanTranslatorCapture",
+                    width,
+                    height,
+                    density,
+                    DisplayManager
+                        .VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    imageReader!!.surface,
+                    null,
+                    handler
+                )
+
+        } catch (e: Exception) {
+
+            releaseCaptureObjects()
+
+            Toast.makeText(
+                this,
+                "تعذر إنشاء التقاط الشاشة:\n${e.message}",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     private fun saveScreenshot(
-        bitmap: android.graphics.Bitmap
+        bitmap: Bitmap
     ) {
 
         try {
@@ -311,7 +356,7 @@ class FloatingBubbleService : Service() {
             FileOutputStream(file).use { output ->
 
                 bitmap.compress(
-                    android.graphics.Bitmap.CompressFormat.PNG,
+                    Bitmap.CompressFormat.PNG,
                     100,
                     output
                 )
@@ -341,10 +386,18 @@ class FloatingBubbleService : Service() {
 
     private fun releaseCaptureObjects() {
 
-        virtualDisplay?.release()
+        try {
+            virtualDisplay?.release()
+        } catch (_: Exception) {
+        }
+
         virtualDisplay = null
 
-        imageReader?.close()
+        try {
+            imageReader?.close()
+        } catch (_: Exception) {
+        }
+
         imageReader = null
     }
 
@@ -364,9 +417,8 @@ class FloatingBubbleService : Service() {
                     Context.NOTIFICATION_SERVICE
                 ) as NotificationManager
 
-            notificationManager.createNotificationChannel(
-                channel
-            )
+            notificationManager
+                .createNotificationChannel(channel)
         }
     }
 
@@ -378,8 +430,12 @@ class FloatingBubbleService : Service() {
                 this,
                 CHANNEL_ID
             )
-                .setContentTitle("Yazan Translator")
-                .setContentText("جاهز لالتقاط الشاشة")
+                .setContentTitle(
+                    "Yazan Translator"
+                )
+                .setContentText(
+                    "جاهز لالتقاط الشاشة"
+                )
                 .setSmallIcon(
                     android.R.drawable.ic_menu_view
                 )
@@ -390,8 +446,12 @@ class FloatingBubbleService : Service() {
 
             @Suppress("DEPRECATION")
             Notification.Builder(this)
-                .setContentTitle("Yazan Translator")
-                .setContentText("جاهز لالتقاط الشاشة")
+                .setContentTitle(
+                    "Yazan Translator"
+                )
+                .setContentText(
+                    "جاهز لالتقاط الشاشة"
+                )
                 .setSmallIcon(
                     android.R.drawable.ic_menu_view
                 )
@@ -409,7 +469,9 @@ class FloatingBubbleService : Service() {
             textView.apply {
 
                 text = "أ"
+
                 textSize = 22f
+
                 gravity = Gravity.CENTER
 
                 setBackgroundResource(
@@ -430,8 +492,10 @@ class FloatingBubbleService : Service() {
             WindowManager.LayoutParams(
                 120,
                 120,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                WindowManager.LayoutParams
+                    .TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams
+                    .FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT
             )
 
@@ -452,7 +516,7 @@ class FloatingBubbleService : Service() {
 
             Toast.makeText(
                 this,
-                "تعذر إظهار الفقاعة",
+                "تعذر إظهار الفقاعة:\n${e.message}",
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -462,7 +526,11 @@ class FloatingBubbleService : Service() {
 
         releaseCaptureObjects()
 
-        mediaProjection?.stop()
+        try {
+            mediaProjection?.stop()
+        } catch (_: Exception) {
+        }
+
         mediaProjection = null
 
         if (::bubbleView.isInitialized) {
@@ -546,10 +614,16 @@ class FloatingBubbleService : Service() {
                         initialY +
                                 dy.toInt()
 
-                    windowManager.updateViewLayout(
-                        bubbleView,
-                        params
-                    )
+                    try {
+
+                        windowManager
+                            .updateViewLayout(
+                                bubbleView,
+                                params
+                            )
+
+                    } catch (_: Exception) {
+                    }
 
                     return true
                 }
@@ -557,6 +631,7 @@ class FloatingBubbleService : Service() {
                 MotionEvent.ACTION_UP -> {
 
                     if (!moved) {
+
                         captureScreen()
                     }
 
