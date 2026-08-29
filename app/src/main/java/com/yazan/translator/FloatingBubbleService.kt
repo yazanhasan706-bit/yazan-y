@@ -9,6 +9,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
+import kotlin.math.abs
 
 class FloatingBubbleService : Service() {
 
@@ -65,7 +66,6 @@ private inner class BubbleTouchListener : View.OnTouchListener {
     private var initialY = 0
     private var initialTouchX = 0f
     private var initialTouchY = 0f
-
     private var moved = false
 
     override fun onTouch(
@@ -96,9 +96,7 @@ private inner class BubbleTouchListener : View.OnTouchListener {
                 val dx = event.rawX - initialTouchX
                 val dy = event.rawY - initialTouchY
 
-                if (kotlin.math.abs(dx) > 10 ||
-                    kotlin.math.abs(dy) > 10
-                ) {
+                if (abs(dx) > 10 || abs(dy) > 10) {
                     moved = true
                 }
 
@@ -125,6 +123,11 @@ private inner class BubbleTouchListener : View.OnTouchListener {
                     intent.addFlags(
                         Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    )
+
+                    intent.putExtra(
+                        "START_SCREEN_CAPTURE",
+                        true
                     )
 
                     startActivity(intent)
