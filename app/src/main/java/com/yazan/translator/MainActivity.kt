@@ -3,9 +3,9 @@ package com.yazan.translator
 import android.app.Activity
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
-import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.net.Uri
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -22,47 +22,57 @@ override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_main)
 
-    val translateButton = findViewById<Button>(R.id.translateButton)
-    val resultText = findViewById<TextView>(R.id.resultText)
-
     mediaProjectionManager =
         getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
+    val translateButton =
+        findViewById<Button>(R.id.translateButton)
+
+    val resultText =
+        findViewById<TextView>(R.id.resultText)
+
     translateButton.setOnClickListener {
 
-        resultText.text = "جاري تجهيز قراءة الشاشة..."
-
-        val captureIntent =
-            mediaProjectionManager.createScreenCaptureIntent()
-
-        startActivityForResult(
-            captureIntent,
-            SCREEN_CAPTURE_REQUEST_CODE
-        )
+        requestScreenCapture()
     }
 
-    // تشغيل الفقاعة العائمة
+    // تشغيل الفقاعة إذا كانت الصلاحية موجودة
     if (Settings.canDrawOverlays(this)) {
-        startBubble()
+        startBubbleService()
     } else {
-        val intent = Intent(
+        val overlayIntent = Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
             Uri.parse("package:$packageName")
         )
-        startActivity(intent)
+
+        startActivity(overlayIntent)
     }
 }
 
-private fun startBubble() {
-    val intent = Intent(this, FloatingBubbleService::class.java)
-    startService(intent)
+private fun requestScreenCapture() {
+
+    val captureIntent =
+        mediaProjectionManager.createScreenCaptureIntent()
+
+    startActivityForResult(
+        captureIntent,
+        SCREEN_CAPTURE_REQUEST_CODE
+    )
+}
+
+private fun startBubbleService() {
+
+    val serviceIntent =
+        Intent(this, FloatingBubbleService::class.java)
+
+    startService(serviceIntent)
 }
 
 override fun onResume() {
     super.onResume()
 
     if (Settings.canDrawOverlays(this)) {
-        startBubble()
+        startBubbleService()
     }
 }
 
@@ -72,18 +82,28 @@ override fun onActivityResult(
     resultCode: Int,
     data: Intent?
 ) {
-    super.onActivityResult(requestCode, resultCode, data)
+    super.onActivityResult(
+        requestCode,
+        resultCode,
+        data
+    )
 
     if (requestCode == SCREEN_CAPTURE_REQUEST_CODE) {
 
-        if (resultCode == Activity.RESULT_OK && data != null) {
+        val resultText =
+            findViewById<TextView>(R.id.resultText)
 
-            findViewById<TextView>(R.id.resultText).text =
-                "تم السماح بالتقاط الشاشة.\n\nالخطوة التالية: قراءة النص من الشاشة."
+        if (
+            resultCode == Activity.RESULT_OK &&
+            data != null
+        ) {
+
+            resultText.text =
+                "تم السماح بالتقاط الشاشة ✅\n\nجاهز للخطوة التالية."
 
         } else {
 
-            findViewById<TextView>(R.id.resultText).text =
+            resultText.text =
                 "لم يتم السماح بالتقاط الشاشة."
         }
     }
