@@ -7,16 +7,25 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.IBinder
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
+import android.widget.Toast
+import java.io.File
+import java.io.FileOutputStream
 import kotlin.math.abs
 
 class FloatingBubbleService : Service() {
@@ -25,8 +34,13 @@ private lateinit var windowManager: WindowManager
 private lateinit var bubbleView: View
 
 private var mediaProjection: MediaProjection? = null
+private var virtualDisplay: VirtualDisplay? = null
+private var imageReader: ImageReader? = null
+
+private val handler = Handler(Looper.getMainLooper())
 
 companion object {
+
     private const val CHANNEL_ID = "screen_capture_channel"
     private const val NOTIFICATION_ID = 1001
 
@@ -35,6 +49,9 @@ companion object {
 
     private const val RESULT_CODE = "RESULT_CODE"
     private const val RESULT_DATA = "RESULT_DATA"
+
+    private const val SCREEN_WIDTH = 1080
+    private const val SCREEN_HEIGHT = 2400
 }
 
 override fun onCreate() {
@@ -64,19 +81,25 @@ override fun onStartCommand(
 
         val resultData: Intent? =
             if (Build.VERSION.SDK_INT >= 33) {
+
                 intent.getParcelableExtra(
                     RESULT_DATA,
                     Intent::class.java
                 )
+
             } else {
+
                 @Suppress("DEPRECATION")
-                intent.getParcelableExtra(RESULT_DATA)
+                intent.getParcelableExtra(
+                    RESULT_DATA
+                )
             }
 
         if (
             resultCode != 0 &&
             resultData != null
         ) {
+
             startProjection(
                 resultCode,
                 resultData
@@ -129,6 +152,194 @@ private fun startProjection(
         )
 }
 
+private fun captureScreen() {
+
+    val projection = mediaProjection
+
+    if (projection == null) {
+
+        Toast.makeText(
+            this,
+            "التقاط الشاشة غير جاهز",
+            Toast.LENGTH_SHORT
+        ).show()
+
+        return
+    }
+
+    if (virtualDisplay != null) {
+        return
+    }
+
+    val metrics =
+        resources.displayMetrics
+
+    val width =
+        if (metrics.widthPixels > 0) {
+            metrics.widthPixels
+        } else {
+            SCREEN_WIDTH
+        }
+
+    val height =
+        if (metrics.heightPixels > 0) {
+            metrics.heightPixels
+        } else {
+            SCREEN_HEIGHT
+        }
+
+    val density =
+        metrics.densityDpi
+
+    imageReader =
+        ImageReader.newInstance(
+            width,
+            height,
+            PixelFormat.RGBA_8888,
+            2
+        )
+
+    imageReader?.setOnImageAvailableListener(
+        { reader ->
+
+            val image =
+                reader.acquireLatestImage()
+                    ?: return@setOnImageAvailableListener
+
+            try {
+
+                val plane =
+                    image.planes[0]
+
+                val buffer =
+                    plane.buffer
+
+                val pixelStride =
+                    plane.pixelStride
+
+                val rowStride =
+                    plane.rowStride
+
+                val rowPadding =
+                    rowStride -
+                        pixelStride * width
+
+                val bitmapWidth =
+                    width +
+                        rowPadding / pixelStride
+
+                val bitmap =
+                    Bitmap.createBitmap(
+                        bitmapWidth,
+                        height,
+                        Bitmap.Config.ARGB_8888
+                    )
+
+                bitmap.copyPixelsFromBuffer(
+                    buffer
+                )
+
+                val croppedBitmap =
+                    Bitmap.createBitmap(
+                        bitmap,
+                        0,
+                        0,
+                        width,
+                        height
+                    )
+
+                bitmap.recycle()
+
+                saveScreenshot(
+                    croppedBitmap
+                )
+
+                croppedBitmap.recycle()
+
+            } catch (e: Exception) {
+
+                Toast.makeText(
+                    this,
+                    "فشل التقاط الشاشة",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+            } finally {
+
+                image.close()
+
+                releaseCaptureObjects()
+            }
+
+        },
+        handler
+    )
+
+    virtualDisplay =
+        projection.createVirtualDisplay(
+            "YazanTranslatorCapture",
+            width,
+            height,
+            density,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            imageReader!!.surface,
+            null,
+            handler
+        )
+}
+
+private fun saveScreenshot(
+    bitmap: Bitmap
+) {
+
+    try {
+
+        val file =
+            File(
+                cacheDir,
+                "screen_capture.png"
+            )
+
+        FileOutputStream(file).use { output ->
+
+            bitmap.compress(
+                Bitmap.CompressFormat.PNG,
+                100,
+                output
+            )
+        }
+
+        handler.post {
+
+            Toast.makeText(
+                this,
+                "تم التقاط الشاشة ✅",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+
+    } catch (e: Exception) {
+
+        handler.post {
+
+            Toast.makeText(
+                this,
+                "تعذر حفظ لقطة الشاشة",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+}
+
+private fun releaseCaptureObjects() {
+
+    virtualDisplay?.release()
+    virtualDisplay = null
+
+    imageReader?.close()
+    imageReader = null
+}
+
 private fun createNotificationChannel() {
 
     if (Build.VERSION.SDK_INT >= 26) {
@@ -161,7 +372,9 @@ private fun createNotification(): Notification {
         )
             .setContentTitle("Yazan Translator")
             .setContentText("جاهز لالتقاط الشاشة")
-            .setSmallIcon(android.R.drawable.ic_menu_view)
+            .setSmallIcon(
+                android.R.drawable.ic_menu_view
+            )
             .setOngoing(true)
             .build()
 
@@ -171,7 +384,9 @@ private fun createNotification(): Notification {
         Notification.Builder(this)
             .setContentTitle("Yazan Translator")
             .setContentText("جاهز لالتقاط الشاشة")
-            .setSmallIcon(android.R.drawable.ic_menu_view)
+            .setSmallIcon(
+                android.R.drawable.ic_menu_view
+            )
             .setOngoing(true)
             .build()
     }
@@ -182,20 +397,21 @@ private fun createBubble() {
     val textView =
         TextView(this)
 
-    bubbleView = textView.apply {
+    bubbleView =
+        textView.apply {
 
-        text = "أ"
-        textSize = 22f
-        gravity = Gravity.CENTER
+            text = "أ"
+            textSize = 22f
+            gravity = Gravity.CENTER
 
-        setBackgroundResource(
-            android.R.drawable.btn_default
-        )
+            setBackgroundResource(
+                android.R.drawable.btn_default
+            )
 
-        setOnTouchListener(
-            BubbleTouchListener()
-        )
-    }
+            setOnTouchListener(
+                BubbleTouchListener()
+            )
+        }
 
     windowManager =
         getSystemService(
@@ -225,15 +441,19 @@ private fun createBubble() {
 
 override fun onDestroy() {
 
+    releaseCaptureObjects()
+
     mediaProjection?.stop()
     mediaProjection = null
 
     if (::bubbleView.isInitialized) {
 
         try {
+
             windowManager.removeView(
                 bubbleView
             )
+
         } catch (_: Exception) {
         }
     }
@@ -265,7 +485,7 @@ private inner class BubbleTouchListener :
 
         val params =
             bubbleView.layoutParams
-                    as WindowManager.LayoutParams
+                as WindowManager.LayoutParams
 
         when (event.action) {
 
@@ -285,10 +505,12 @@ private inner class BubbleTouchListener :
             MotionEvent.ACTION_MOVE -> {
 
                 val dx =
-                    event.rawX - initialTouchX
+                    event.rawX -
+                        initialTouchX
 
                 val dy =
-                    event.rawY - initialTouchY
+                    event.rawY -
+                        initialTouchY
 
                 if (
                     abs(dx) > 10 ||
@@ -298,10 +520,12 @@ private inner class BubbleTouchListener :
                 }
 
                 params.x =
-                    initialX + dx.toInt()
+                    initialX +
+                        dx.toInt()
 
                 params.y =
-                    initialY + dy.toInt()
+                    initialY +
+                        dy.toInt()
 
                 windowManager.updateViewLayout(
                     bubbleView,
@@ -315,34 +539,7 @@ private inner class BubbleTouchListener :
 
                 if (!moved) {
 
-                    if (mediaProjection != null) {
-
-                        android.widget.Toast.makeText(
-                            this@FloatingBubbleService,
-                            "التقاط الشاشة جاهز",
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
-
-                    } else {
-
-                        val intent =
-                            Intent(
-                                this@FloatingBubbleService,
-                                MainActivity::class.java
-                            )
-
-                        intent.addFlags(
-                            Intent.FLAG_ACTIVITY_NEW_TASK or
-                                Intent.FLAG_ACTIVITY_SINGLE_TOP
-                        )
-
-                        intent.putExtra(
-                            "START_SCREEN_CAPTURE",
-                            true
-                        )
-
-                        startActivity(intent)
-                    }
+                    captureScreen()
                 }
 
                 return true
