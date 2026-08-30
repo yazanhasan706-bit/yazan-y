@@ -8,7 +8,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
@@ -26,13 +28,11 @@ import android.widget.TextView
 import android.widget.Toast
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.nl.translate.TranslateLanguage
-import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
-import java.io.File
-import java.io.FileOutputStream
 import kotlin.math.abs
 
 class FloatingBubbleService : Service() {
@@ -43,7 +43,6 @@ class FloatingBubbleService : Service() {
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
-
     private var projectionCallback: MediaProjection.Callback? = null
 
     private val handler =
@@ -51,7 +50,10 @@ class FloatingBubbleService : Service() {
 
     private var translator: Translator? = null
 
-    private var resultOverlay: View? = null
+    private val translationViews =
+        mutableListOf<View>()
+
+    private var dismissTouchView: View? = null
 
     companion object {
 
@@ -73,6 +75,11 @@ class FloatingBubbleService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+
+        windowManager =
+            getSystemService(
+                WINDOW_SERVICE
+            ) as WindowManager
 
         createBubble()
         createTranslator()
@@ -192,6 +199,8 @@ class FloatingBubbleService : Service() {
 
                             mediaProjection = null
 
+                            removeAllTranslations()
+
                             showToast(
                                 "تم إيقاف مشاركة الشاشة"
                             )
@@ -292,12 +301,12 @@ class FloatingBubbleService : Service() {
 
                         val rowPadding =
                             rowStride -
-                                    pixelStride * width
+                                pixelStride * width
 
                         val bitmapWidth =
                             width +
-                                    rowPadding /
-                                    pixelStride
+                                rowPadding /
+                                pixelStride
 
                         val bitmap =
                             Bitmap.createBitmap(
@@ -312,7 +321,7 @@ class FloatingBubbleService : Service() {
                             buffer
                         )
 
-                        val croppedBitmap =
+                        val cropped =
                             Bitmap.createBitmap(
                                 bitmap,
                                 0,
@@ -324,7 +333,7 @@ class FloatingBubbleService : Service() {
                         bitmap.recycle()
 
                         processImage(
-                            croppedBitmap
+                            cropped
                         )
 
                     } catch (e: Exception) {
@@ -398,23 +407,52 @@ class FloatingBubbleService : Service() {
         )
             .addOnSuccessListener { result ->
 
+                val words =
+                    mutableListOf<WordData>()
+
+                for (block in result.textBlocks) {
+
+                    for (line in block.lines) {
+
+                        for (
+                            element in line.elements
+                        ) {
+
+                            val text =
+                                element.text.trim()
+
+                            val box =
+                                element.boundingBox
+
+                            if (
+                                !text.isNullOrEmpty() &&
+                                box != null &&
+                                containsEnglish(text)
+                            ) {
+
+                                words.add(
+                                    WordData(
+                                        text,
+                                        Rect(box)
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
                 bitmap.recycle()
 
-                val englishText =
-                    result.text.trim()
-
-                if (englishText.isEmpty()) {
+                if (words.isEmpty()) {
 
                     showToast(
-                        "لم يتم العثور على نص إنجليزي"
+                        "لم يتم العثور على كلمات إنجليزية"
                     )
 
                     return@addOnSuccessListener
                 }
 
-                translateText(
-                    englishText
-                )
+                translateWords(words)
             }
             .addOnFailureListener { e ->
 
@@ -426,25 +464,26 @@ class FloatingBubbleService : Service() {
             }
     }
 
-    private fun createTranslator() {
+    private fun containsEnglish(
+        text: String
+    ): Boolean {
 
-        translator =
-            Translation
-                .getClient(
-                    com.google.mlkit.nl.translate.TranslatorOptions
-                        .Builder()
-                        .setSourceLanguage(
-                            TranslateLanguage.ENGLISH
-                        )
-                        .setTargetLanguage(
-                            TranslateLanguage.ARABIC
-                        )
-                        .build()
-                )
+        for (character in text) {
+
+            if (
+                character in 'A'..'Z' ||
+                character in 'a'..'z'
+            ) {
+
+                return true
+            }
+        }
+
+        return false
     }
 
-    private fun translateText(
-        englishText: String
+    private fun translateWords(
+        words: List<WordData>
     ) {
 
         val currentTranslator =
@@ -459,16 +498,8 @@ class FloatingBubbleService : Service() {
             return
         }
 
-        handler.post {
-
-            showToast(
-                "جارٍ ترجمة النص..."
-            )
-        }
-
         val conditions =
             DownloadConditions.Builder()
-                .requireWifi()
                 .build()
 
         currentTranslator
@@ -477,20 +508,61 @@ class FloatingBubbleService : Service() {
             )
             .addOnSuccessListener {
 
-                currentTranslator
-                    .translate(englishText)
-                    .addOnSuccessListener { translatedText ->
+                val translatedWords =
+                    mutableListOf<TranslatedWord>()
 
-                        showTranslationOverlay(
-                            translatedText
-                        )
-                    }
-                    .addOnFailureListener { e ->
+                fun translateNext(
+                    index: Int
+                ) {
 
-                        showToast(
-                            "فشلت الترجمة:\n${e.message}"
+                    if (
+                        index >= words.size
+                    ) {
+
+                        showTranslations(
+                            translatedWords
                         )
+
+                        return
                     }
+
+                    val word =
+                        words[index]
+
+                    currentTranslator
+                        .translate(
+                            word.text
+                        )
+                        .addOnSuccessListener { arabic ->
+
+                            val translated =
+                                arabic.trim()
+
+                            if (
+                                translated.isNotEmpty()
+                            ) {
+
+                                translatedWords.add(
+                                    TranslatedWord(
+                                        word,
+                                        translated
+                                    )
+                                )
+                            }
+
+                            translateNext(
+                                index + 1
+                            )
+                        }
+                        .addOnFailureListener {
+
+                            translateNext(
+                                index + 1
+                            )
+                        }
+                }
+
+                translateNext(0)
             }
             .addOnFailureListener { e ->
 
@@ -500,134 +572,340 @@ class FloatingBubbleService : Service() {
             }
     }
 
-    private fun showTranslationOverlay(
-        translatedText: String
+    private fun showTranslations(
+        translations:
+            List<TranslatedWord>
     ) {
 
         handler.post {
 
-            removeTranslationOverlay()
+            removeAllTranslations()
 
-            val textView =
-                TextView(this)
-
-            textView.text =
-                translatedText
-
-            textView.textSize =
-                18f
-
-            textView.setTextColor(
-                android.graphics.Color.WHITE
-            )
-
-            textView.setPadding(
-                24,
-                18,
-                24,
-                18
-            )
-
-            textView.setBackgroundColor(
-                android.graphics.Color.argb(
-                    220,
-                    0,
-                    0,
-                    0
-                )
-            )
-
-            textView.gravity =
-                Gravity.CENTER
-
-            val params =
-                WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.WRAP_CONTENT,
-                    WindowManager.LayoutParams.WRAP_CONTENT,
-                    WindowManager.LayoutParams
-                        .TYPE_APPLICATION_OVERLAY,
-                    WindowManager.LayoutParams
-                        .FLAG_NOT_FOCUSABLE or
-                            WindowManager.LayoutParams
-                                .FLAG_NOT_TOUCHABLE,
-                    PixelFormat.TRANSLUCENT
-                )
-
-            params.gravity =
-                Gravity.CENTER
-
-            try {
-
-                windowManager.addView(
-                    textView,
-                    params
-                )
-
-                resultOverlay =
-                    textView
-
-            } catch (e: Exception) {
+            if (translations.isEmpty()) {
 
                 showToast(
-                    "تعذر إظهار الترجمة:\n${e.message}"
+                    "لم تنجح الترجمة"
+                )
+
+                return@post
+            }
+
+            for (
+                item in translations
+            ) {
+
+                addTranslationView(
+                    item.word.box,
+                    item.translation
                 )
             }
+
+            createDismissTouchLayer()
+
+            showToast(
+                "تمت الترجمة ✅"
+            )
         }
     }
 
-    private fun removeTranslationOverlay() {
+    private fun addTranslationView(
+        box: Rect,
+        translation: String
+    ) {
 
-        if (resultOverlay != null) {
+        val textView =
+            TextView(this)
+
+        textView.text =
+            translation
+
+        textView.gravity =
+            Gravity.CENTER
+
+        textView.setTextColor(
+            Color.WHITE
+        )
+
+        textView.setBackgroundColor(
+            Color.argb(
+                225,
+                0,
+                0,
+                0
+            )
+        )
+
+        textView.setPadding(
+            3,
+            0,
+            3,
+            0
+        )
+
+        val width =
+            box.width()
+                .coerceAtLeast(45)
+
+        val height =
+            box.height()
+                .coerceAtLeast(30)
+
+        val textSize =
+            (
+                box.height() * 0.65f
+            ).coerceIn(
+                10f,
+                28f
+            )
+
+        textView.textSize =
+            textSize
+
+        val params =
+            WindowManager.LayoutParams(
+                width,
+                height,
+                WindowManager.LayoutParams
+                    .TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams
+                    .FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams
+                    .FLAG_NOT_TOUCHABLE,
+                PixelFormat.TRANSLUCENT
+            )
+
+        params.gravity =
+            Gravity.TOP or
+            Gravity.START
+
+        params.x =
+            box.left
+
+        params.y =
+            box.top
+
+        try {
+
+            windowManager.addView(
+                textView,
+                params
+            )
+
+            translationViews.add(
+                textView
+            )
+
+        } catch (e: Exception) {
+
+            showToast(
+                "تعذر إظهار الترجمة:\n${e.message}"
+            )
+        }
+    }
+
+    /*
+     * طبقة شفافة تستقبل أول لمسة على الشاشة.
+     *
+     * عند أول لمسة:
+     * 1. تحذف جميع الترجمات.
+     * 2. تحذف طبقة اللمس.
+     * 3. تعود الشاشة للوضع الطبيعي.
+     */
+    private fun createDismissTouchLayer() {
+
+        removeDismissTouchLayer()
+
+        val touchView =
+            View(this)
+
+        touchView.setBackgroundColor(
+            Color.TRANSPARENT
+        )
+
+        val params =
+            WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams
+                    .TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams
+                    .FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            )
+
+        params.gravity =
+            Gravity.TOP or
+            Gravity.START
+
+        touchView.setOnTouchListener { _, event ->
+
+            if (
+                event.action ==
+                MotionEvent.ACTION_DOWN
+            ) {
+
+                removeAllTranslations()
+
+                removeDismissTouchLayer()
+
+                true
+
+            } else {
+
+                true
+            }
+        }
+
+        try {
+
+            windowManager.addView(
+                touchView,
+                params
+            )
+
+            dismissTouchView =
+                touchView
+
+        } catch (e: Exception) {
+
+            showToast(
+                "تعذر تفعيل لمس الإخفاء:\n${e.message}"
+            )
+        }
+    }
+
+    private fun removeDismissTouchLayer() {
+
+        val view =
+            dismissTouchView
+                ?: return
+
+        try {
+
+            windowManager.removeView(
+                view
+            )
+
+        } catch (_: Exception) {
+        }
+
+        dismissTouchView = null
+    }
+
+    private fun removeAllTranslations() {
+
+        removeDismissTouchLayer()
+
+        val views =
+            translationViews.toList()
+
+        translationViews.clear()
+
+        for (view in views) {
 
             try {
 
                 windowManager.removeView(
-                    resultOverlay
+                    view
                 )
 
             } catch (_: Exception) {
             }
-
-            resultOverlay = null
         }
     }
 
-    private fun saveScreenshot(
-        bitmap: Bitmap
-    ) {
+    private fun createTranslator() {
 
-        try {
+        translator =
+            Translation.getClient(
+                com.google.mlkit.nl.translate.TranslatorOptions
+                    .Builder()
+                    .setSourceLanguage(
+                        TranslateLanguage.ENGLISH
+                    )
+                    .setTargetLanguage(
+                        TranslateLanguage.ARABIC
+                    )
+                    .build()
+            )
+    }
 
-            val file =
-                File(
-                    cacheDir,
-                    "screen_capture.png"
+    private fun createBubble() {
+
+        val textView =
+            TextView(this)
+
+        bubbleView =
+            textView.apply {
+
+                text = "أ"
+
+                textSize = 22f
+
+                gravity =
+                    Gravity.CENTER
+
+                setTextColor(
+                    Color.WHITE
                 )
 
-            FileOutputStream(file).use { output ->
+                setBackgroundResource(
+                    android.R.drawable.btn_default
+                )
 
-                bitmap.compress(
-                    Bitmap.CompressFormat.PNG,
-                    100,
-                    output
+                setOnTouchListener(
+                    BubbleTouchListener()
                 )
             }
 
-        } catch (_: Exception) {
+        val params =
+            WindowManager.LayoutParams(
+                120,
+                120,
+                WindowManager.LayoutParams
+                    .TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams
+                    .FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            )
+
+        params.gravity =
+            Gravity.TOP or
+            Gravity.START
+
+        params.x = 30
+        params.y = 200
+
+        try {
+
+            windowManager.addView(
+                bubbleView,
+                params
+            )
+
+        } catch (e: Exception) {
+
+            showToast(
+                "تعذر إظهار الفقاعة:\n${e.message}"
+            )
         }
     }
 
     private fun releaseCaptureObjects() {
 
         try {
+
             virtualDisplay?.release()
+
         } catch (_: Exception) {
         }
 
         virtualDisplay = null
 
         try {
+
             imageReader?.close()
+
         } catch (_: Exception) {
         }
 
@@ -645,21 +923,23 @@ class FloatingBubbleService : Service() {
                     NotificationManager.IMPORTANCE_LOW
                 )
 
-            val notificationManager =
+            val manager =
                 getSystemService(
                     Context.NOTIFICATION_SERVICE
                 ) as NotificationManager
 
-            notificationManager
-                .createNotificationChannel(
-                    channel
-                )
+            manager.createNotificationChannel(
+                channel
+            )
         }
     }
 
-    private fun createNotification(): Notification {
+    private fun createNotification():
+        Notification {
 
-        return if (Build.VERSION.SDK_INT >= 26) {
+        return if (
+            Build.VERSION.SDK_INT >= 26
+        ) {
 
             Notification.Builder(
                 this,
@@ -680,6 +960,7 @@ class FloatingBubbleService : Service() {
         } else {
 
             @Suppress("DEPRECATION")
+
             Notification.Builder(this)
                 .setContentTitle(
                     "Yazan Translator"
@@ -692,70 +973,6 @@ class FloatingBubbleService : Service() {
                 )
                 .setOngoing(true)
                 .build()
-        }
-    }
-
-    private fun createBubble() {
-
-        val textView =
-            TextView(this)
-
-        bubbleView =
-            textView.apply {
-
-                text = "أ"
-
-                textSize = 22f
-
-                gravity = Gravity.CENTER
-
-                setTextColor(
-                    android.graphics.Color.WHITE
-                )
-
-                setBackgroundResource(
-                    android.R.drawable.btn_default
-                )
-
-                setOnTouchListener(
-                    BubbleTouchListener()
-                )
-            }
-
-        windowManager =
-            getSystemService(
-                WINDOW_SERVICE
-            ) as WindowManager
-
-        val params =
-            WindowManager.LayoutParams(
-                120,
-                120,
-                WindowManager.LayoutParams
-                    .TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams
-                    .FLAG_NOT_FOCUSABLE,
-                PixelFormat.TRANSLUCENT
-            )
-
-        params.gravity =
-            Gravity.TOP or Gravity.START
-
-        params.x = 30
-        params.y = 200
-
-        try {
-
-            windowManager.addView(
-                bubbleView,
-                params
-            )
-
-        } catch (e: Exception) {
-
-            showToast(
-                "تعذر إظهار الفقاعة:\n${e.message}"
-            )
         }
     }
 
@@ -775,7 +992,7 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
 
-        removeTranslationOverlay()
+        removeAllTranslations()
 
         releaseCaptureObjects()
 
@@ -798,16 +1015,21 @@ class FloatingBubbleService : Service() {
         projectionCallback = null
 
         try {
+
             mediaProjection?.stop()
+
         } catch (_: Exception) {
         }
 
         mediaProjection = null
 
         translator?.close()
+
         translator = null
 
-        if (::bubbleView.isInitialized) {
+        if (
+            ::bubbleView.isInitialized
+        ) {
 
             try {
 
@@ -825,10 +1047,12 @@ class FloatingBubbleService : Service() {
     override fun onBind(
         intent: Intent?
     ): IBinder? {
+
         return null
     }
 
-    private inner class BubbleTouchListener :
+    private inner class
+        BubbleTouchListener :
         View.OnTouchListener {
 
         private var initialX = 0
@@ -848,12 +1072,17 @@ class FloatingBubbleService : Service() {
                 bubbleView.layoutParams
                     as WindowManager.LayoutParams
 
-            when (event.action) {
+            when (
+                event.action
+            ) {
 
                 MotionEvent.ACTION_DOWN -> {
 
-                    initialX = params.x
-                    initialY = params.y
+                    initialX =
+                        params.x
+
+                    initialY =
+                        params.y
 
                     initialTouchX =
                         event.rawX
@@ -870,26 +1099,27 @@ class FloatingBubbleService : Service() {
 
                     val dx =
                         event.rawX -
-                            initialTouchX
+                        initialTouchX
 
                     val dy =
                         event.rawY -
-                            initialTouchY
+                        initialTouchY
 
                     if (
                         abs(dx) > 10 ||
                         abs(dy) > 10
                     ) {
+
                         moved = true
                     }
 
                     params.x =
                         initialX +
-                            dx.toInt()
+                        dx.toInt()
 
                     params.y =
                         initialY +
-                            dy.toInt()
+                        dy.toInt()
 
                     try {
 
@@ -908,6 +1138,9 @@ class FloatingBubbleService : Service() {
                 MotionEvent.ACTION_UP -> {
 
                     if (!moved) {
+
+                        removeAllTranslations()
+
                         captureScreen()
                     }
 
@@ -918,4 +1151,14 @@ class FloatingBubbleService : Service() {
             return false
         }
     }
+
+    private data class WordData(
+        val text: String,
+        val box: Rect
+    )
+
+    private data class TranslatedWord(
+        val word: WordData,
+        val translation: String
+    )
 }
