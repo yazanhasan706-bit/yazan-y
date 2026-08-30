@@ -24,6 +24,13 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
 import android.widget.Toast
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translator
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.abs
@@ -37,8 +44,14 @@ class FloatingBubbleService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
 
+    private var projectionCallback: MediaProjection.Callback? = null
+
     private val handler =
         Handler(Looper.getMainLooper())
+
+    private var translator: Translator? = null
+
+    private var resultOverlay: View? = null
 
     companion object {
 
@@ -62,6 +75,7 @@ class FloatingBubbleService : Service() {
         super.onCreate()
 
         createBubble()
+        createTranslator()
     }
 
     override fun onStartCommand(
@@ -160,20 +174,45 @@ class FloatingBubbleService : Service() {
 
             if (mediaProjection == null) {
 
-                Toast.makeText(
-                    this,
-                    "تعذر تفعيل التقاط الشاشة",
-                    Toast.LENGTH_LONG
-                ).show()
+                showToast(
+                    "تعذر تفعيل التقاط الشاشة"
+                )
+
+                return
             }
+
+            projectionCallback =
+                object : MediaProjection.Callback() {
+
+                    override fun onStop() {
+
+                        handler.post {
+
+                            releaseCaptureObjects()
+
+                            mediaProjection = null
+
+                            showToast(
+                                "تم إيقاف مشاركة الشاشة"
+                            )
+                        }
+                    }
+                }
+
+            mediaProjection?.registerCallback(
+                projectionCallback!!,
+                handler
+            )
+
+            showToast(
+                "تم تفعيل التقاط الشاشة ✅"
+            )
 
         } catch (e: Exception) {
 
-            Toast.makeText(
-                this,
-                "خطأ في خدمة التقاط الشاشة:\n${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
+            showToast(
+                "خطأ في خدمة التقاط الشاشة:\n${e.message}"
+            )
         }
     }
 
@@ -184,11 +223,9 @@ class FloatingBubbleService : Service() {
 
         if (projection == null) {
 
-            Toast.makeText(
-                this,
-                "التقاط الشاشة غير جاهز",
-                Toast.LENGTH_SHORT
-            ).show()
+            showToast(
+                "التقاط الشاشة غير جاهز"
+            )
 
             return
         }
@@ -217,11 +254,9 @@ class FloatingBubbleService : Service() {
                 density <= 0
             ) {
 
-                Toast.makeText(
-                    this,
-                    "تعذر معرفة أبعاد الشاشة",
-                    Toast.LENGTH_SHORT
-                ).show()
+                showToast(
+                    "تعذر معرفة أبعاد الشاشة"
+                )
 
                 return
             }
@@ -288,22 +323,15 @@ class FloatingBubbleService : Service() {
 
                         bitmap.recycle()
 
-                        saveScreenshot(
+                        processImage(
                             croppedBitmap
                         )
 
-                        croppedBitmap.recycle()
-
                     } catch (e: Exception) {
 
-                        handler.post {
-
-                            Toast.makeText(
-                                this,
-                                "فشل التقاط الشاشة:\n${e.message}",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
+                        showToast(
+                            "فشل تجهيز الصورة:\n${e.message}"
+                        )
 
                     } finally {
 
@@ -329,15 +357,238 @@ class FloatingBubbleService : Service() {
                     handler
                 )
 
+            showToast(
+                "جارٍ التقاط الشاشة..."
+            )
+
         } catch (e: Exception) {
 
             releaseCaptureObjects()
 
-            Toast.makeText(
-                this,
-                "تعذر إنشاء التقاط الشاشة:\n${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
+            showToast(
+                "تعذر إنشاء التقاط الشاشة:\n${e.message}"
+            )
+        }
+    }
+
+    private fun processImage(
+        bitmap: Bitmap
+    ) {
+
+        handler.post {
+
+            showToast(
+                "جارٍ قراءة النص..."
+            )
+        }
+
+        val inputImage =
+            InputImage.fromBitmap(
+                bitmap,
+                0
+            )
+
+        val recognizer =
+            TextRecognition.getClient(
+                TextRecognizerOptions.DEFAULT_OPTIONS
+            )
+
+        recognizer.process(
+            inputImage
+        )
+            .addOnSuccessListener { result ->
+
+                bitmap.recycle()
+
+                val englishText =
+                    result.text.trim()
+
+                if (englishText.isEmpty()) {
+
+                    showToast(
+                        "لم يتم العثور على نص إنجليزي"
+                    )
+
+                    return@addOnSuccessListener
+                }
+
+                translateText(
+                    englishText
+                )
+            }
+            .addOnFailureListener { e ->
+
+                bitmap.recycle()
+
+                showToast(
+                    "فشل OCR:\n${e.message}"
+                )
+            }
+    }
+
+    private fun createTranslator() {
+
+        translator =
+            Translation
+                .getClient(
+                    com.google.mlkit.nl.translate.TranslatorOptions
+                        .Builder()
+                        .setSourceLanguage(
+                            TranslateLanguage.ENGLISH
+                        )
+                        .setTargetLanguage(
+                            TranslateLanguage.ARABIC
+                        )
+                        .build()
+                )
+    }
+
+    private fun translateText(
+        englishText: String
+    ) {
+
+        val currentTranslator =
+            translator
+
+        if (currentTranslator == null) {
+
+            showToast(
+                "محرك الترجمة غير جاهز"
+            )
+
+            return
+        }
+
+        handler.post {
+
+            showToast(
+                "جارٍ ترجمة النص..."
+            )
+        }
+
+        val conditions =
+            DownloadConditions.Builder()
+                .requireWifi()
+                .build()
+
+        currentTranslator
+            .downloadModelIfNeeded(
+                conditions
+            )
+            .addOnSuccessListener {
+
+                currentTranslator
+                    .translate(englishText)
+                    .addOnSuccessListener { translatedText ->
+
+                        showTranslationOverlay(
+                            translatedText
+                        )
+                    }
+                    .addOnFailureListener { e ->
+
+                        showToast(
+                            "فشلت الترجمة:\n${e.message}"
+                        )
+                    }
+            }
+            .addOnFailureListener { e ->
+
+                showToast(
+                    "تعذر تحميل نموذج الترجمة:\n${e.message}"
+                )
+            }
+    }
+
+    private fun showTranslationOverlay(
+        translatedText: String
+    ) {
+
+        handler.post {
+
+            removeTranslationOverlay()
+
+            val textView =
+                TextView(this)
+
+            textView.text =
+                translatedText
+
+            textView.textSize =
+                18f
+
+            textView.setTextColor(
+                android.graphics.Color.WHITE
+            )
+
+            textView.setPadding(
+                24,
+                18,
+                24,
+                18
+            )
+
+            textView.setBackgroundColor(
+                android.graphics.Color.argb(
+                    220,
+                    0,
+                    0,
+                    0
+                )
+            )
+
+            textView.gravity =
+                Gravity.CENTER
+
+            val params =
+                WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams
+                        .TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams
+                        .FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams
+                                .FLAG_NOT_TOUCHABLE,
+                    PixelFormat.TRANSLUCENT
+                )
+
+            params.gravity =
+                Gravity.CENTER
+
+            try {
+
+                windowManager.addView(
+                    textView,
+                    params
+                )
+
+                resultOverlay =
+                    textView
+
+            } catch (e: Exception) {
+
+                showToast(
+                    "تعذر إظهار الترجمة:\n${e.message}"
+                )
+            }
+        }
+    }
+
+    private fun removeTranslationOverlay() {
+
+        if (resultOverlay != null) {
+
+            try {
+
+                windowManager.removeView(
+                    resultOverlay
+                )
+
+            } catch (_: Exception) {
+            }
+
+            resultOverlay = null
         }
     }
 
@@ -362,25 +613,7 @@ class FloatingBubbleService : Service() {
                 )
             }
 
-            handler.post {
-
-                Toast.makeText(
-                    this,
-                    "تم التقاط الشاشة ✅",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-
-        } catch (e: Exception) {
-
-            handler.post {
-
-                Toast.makeText(
-                    this,
-                    "تعذر حفظ لقطة الشاشة",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
+        } catch (_: Exception) {
         }
     }
 
@@ -418,7 +651,9 @@ class FloatingBubbleService : Service() {
                 ) as NotificationManager
 
             notificationManager
-                .createNotificationChannel(channel)
+                .createNotificationChannel(
+                    channel
+                )
         }
     }
 
@@ -434,7 +669,7 @@ class FloatingBubbleService : Service() {
                     "Yazan Translator"
                 )
                 .setContentText(
-                    "جاهز لالتقاط الشاشة"
+                    "جاهز لترجمة الشاشة"
                 )
                 .setSmallIcon(
                     android.R.drawable.ic_menu_view
@@ -450,7 +685,7 @@ class FloatingBubbleService : Service() {
                     "Yazan Translator"
                 )
                 .setContentText(
-                    "جاهز لالتقاط الشاشة"
+                    "جاهز لترجمة الشاشة"
                 )
                 .setSmallIcon(
                     android.R.drawable.ic_menu_view
@@ -473,6 +708,10 @@ class FloatingBubbleService : Service() {
                 textSize = 22f
 
                 gravity = Gravity.CENTER
+
+                setTextColor(
+                    android.graphics.Color.WHITE
+                )
 
                 setBackgroundResource(
                     android.R.drawable.btn_default
@@ -514,17 +753,49 @@ class FloatingBubbleService : Service() {
 
         } catch (e: Exception) {
 
+            showToast(
+                "تعذر إظهار الفقاعة:\n${e.message}"
+            )
+        }
+    }
+
+    private fun showToast(
+        message: String
+    ) {
+
+        handler.post {
+
             Toast.makeText(
                 this,
-                "تعذر إظهار الفقاعة:\n${e.message}",
-                Toast.LENGTH_LONG
+                message,
+                Toast.LENGTH_SHORT
             ).show()
         }
     }
 
     override fun onDestroy() {
 
+        removeTranslationOverlay()
+
         releaseCaptureObjects()
+
+        try {
+
+            if (
+                mediaProjection != null &&
+                projectionCallback != null
+            ) {
+
+                mediaProjection
+                    ?.unregisterCallback(
+                        projectionCallback!!
+                    )
+            }
+
+        } catch (_: Exception) {
+        }
+
+        projectionCallback = null
 
         try {
             mediaProjection?.stop()
@@ -532,6 +803,9 @@ class FloatingBubbleService : Service() {
         }
 
         mediaProjection = null
+
+        translator?.close()
+        translator = null
 
         if (::bubbleView.isInitialized) {
 
@@ -572,7 +846,7 @@ class FloatingBubbleService : Service() {
 
             val params =
                 bubbleView.layoutParams
-                        as WindowManager.LayoutParams
+                    as WindowManager.LayoutParams
 
             when (event.action) {
 
@@ -581,8 +855,11 @@ class FloatingBubbleService : Service() {
                     initialX = params.x
                     initialY = params.y
 
-                    initialTouchX = event.rawX
-                    initialTouchY = event.rawY
+                    initialTouchX =
+                        event.rawX
+
+                    initialTouchY =
+                        event.rawY
 
                     moved = false
 
@@ -593,11 +870,11 @@ class FloatingBubbleService : Service() {
 
                     val dx =
                         event.rawX -
-                                initialTouchX
+                            initialTouchX
 
                     val dy =
                         event.rawY -
-                                initialTouchY
+                            initialTouchY
 
                     if (
                         abs(dx) > 10 ||
@@ -608,11 +885,11 @@ class FloatingBubbleService : Service() {
 
                     params.x =
                         initialX +
-                                dx.toInt()
+                            dx.toInt()
 
                     params.y =
                         initialY +
-                                dy.toInt()
+                            dy.toInt()
 
                     try {
 
@@ -631,7 +908,6 @@ class FloatingBubbleService : Service() {
                 MotionEvent.ACTION_UP -> {
 
                     if (!moved) {
-
                         captureScreen()
                     }
 
